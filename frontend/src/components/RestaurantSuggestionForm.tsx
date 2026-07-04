@@ -2,8 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { BUDGET_OPTIONS, CUISINE_OPTIONS, MOOD_OPTIONS } from "../data/options";
 import { createRestaurant } from "../lib/api";
+import { getDistanceBetweenCoordinatesKm } from "../lib/location";
 import type { Campus } from "../types/api";
-import { PlusCircleIcon } from "./Icons";
+import { MapPinIcon, PlusCircleIcon } from "./Icons";
 
 type RestaurantSuggestionFormProps = {
   campuses: Campus[];
@@ -20,7 +21,11 @@ type FormState = {
   distanceFromCampusKm: number;
   websiteUrl: string;
   description: string;
+  latitude: number | null;
+  longitude: number | null;
 };
+
+const DEVICE_LOCATION_ADDRESS_PREFIX = "Pinned from device location";
 
 export function RestaurantSuggestionForm({
   campuses,
@@ -36,8 +41,12 @@ export function RestaurantSuggestionForm({
     distanceFromCampusKm: 0.5,
     websiteUrl: "",
     description: "",
+    latitude: null,
+    longitude: null,
   });
   const [successMessage, setSuccessMessage] = useState("");
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState("");
 
   useEffect(() => {
     if (!form.campusId && campuses[0]) {
@@ -53,6 +62,37 @@ export function RestaurantSuggestionForm({
     setForm((current) => ({ ...current, campusId: defaultCampusId }));
   }, [defaultCampusId, form.name]);
 
+  const selectedCampus =
+    campuses.find((campus) => campus.id === form.campusId) ?? null;
+
+  useEffect(() => {
+    if (!selectedCampus || form.latitude === null || form.longitude === null) {
+      return;
+    }
+
+    const nextDistance = Number(
+      getDistanceBetweenCoordinatesKm(
+        {
+          latitude: selectedCampus.latitude,
+          longitude: selectedCampus.longitude,
+        },
+        {
+          latitude: form.latitude,
+          longitude: form.longitude,
+        },
+      ).toFixed(2),
+    );
+
+    setForm((current) =>
+      current.distanceFromCampusKm === nextDistance
+        ? current
+        : {
+            ...current,
+            distanceFromCampusKm: nextDistance,
+          },
+    );
+  }, [form.latitude, form.longitude, selectedCampus]);
+
   const submission = useMutation({
     mutationFn: createRestaurant,
     onSuccess: (response) => {
@@ -64,9 +104,53 @@ export function RestaurantSuggestionForm({
         description: "",
         websiteUrl: "",
         distanceFromCampusKm: 0.5,
+        latitude: null,
+        longitude: null,
       }));
+      setLocationError("");
     },
   });
+
+  const requestLocation = () => {
+    if (!("geolocation" in navigator)) {
+      setLocationError("This browser does not support device location.");
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError("");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLatitude = position.coords.latitude;
+        const nextLongitude = position.coords.longitude;
+        const nextAddress = selectedCampus
+          ? `${DEVICE_LOCATION_ADDRESS_PREFIX} near ${selectedCampus.suburb}`
+          : DEVICE_LOCATION_ADDRESS_PREFIX;
+
+        setForm((current) => ({
+          ...current,
+          latitude: nextLatitude,
+          longitude: nextLongitude,
+          address:
+            !current.address.trim() ||
+            current.address.startsWith(DEVICE_LOCATION_ADDRESS_PREFIX)
+              ? nextAddress
+              : current.address,
+        }));
+        setIsLocating(false);
+      },
+      (error) => {
+        setLocationError(error.message || "Unable to access your location.");
+        setIsLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000 * 60 * 5,
+        timeout: 10000,
+      },
+    );
+  };
 
   return (
     <section className="surface-card p-5 sm:p-6">
@@ -106,6 +190,8 @@ export function RestaurantSuggestionForm({
             mood: form.mood,
             description: form.description,
             distanceFromCampusKm: form.distanceFromCampusKm,
+            latitude: form.latitude ?? undefined,
+            longitude: form.longitude ?? undefined,
             websiteUrl: form.websiteUrl || undefined,
           });
         }}
@@ -143,18 +229,73 @@ export function RestaurantSuggestionForm({
           />
         </label>
 
-        <label className="grid gap-2 text-sm font-semibold text-slate-700">
-          Address
+        <div className="grid gap-2 text-sm font-semibold text-slate-700 lg:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <span>Location or landmark</span>
+            <button
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full border border-green-200 bg-green-50 px-4 text-sm font-semibold text-green-700 transition hover:bg-green-100"
+              onClick={requestLocation}
+              type="button"
+            >
+              <MapPinIcon className="h-4 w-4" />
+              {isLocating ? "Finding..." : "Use my location"}
+            </button>
+          </div>
+
           <input
             className="ui-input"
             onChange={(event) =>
               setForm((current) => ({ ...current, address: event.target.value }))
             }
-            placeholder="2 George Street, Brisbane City"
+            placeholder="Use my location or add a nearby street, building, or landmark"
             required
             value={form.address}
           />
-        </label>
+
+          <p className="text-xs font-normal leading-5 text-slate-500">
+            GPS can prefill this for you. If you know the exact shopfront or
+            building name, add it here to help reviewers approve it faster.
+          </p>
+
+          {form.latitude !== null && form.longitude !== null ? (
+            <div className="surface-soft flex flex-wrap items-center justify-between gap-3 rounded-[16px] px-4 py-3 text-sm text-slate-700">
+              <div>
+                <p className="font-semibold text-slate-900">
+                  Device location captured
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {form.latitude.toFixed(5)}, {form.longitude.toFixed(5)}
+                </p>
+              </div>
+
+              <button
+                className="button-secondary px-4 text-sm"
+                onClick={() =>
+                  setForm((current) => ({
+                    ...current,
+                    latitude: null,
+                    longitude: null,
+                    distanceFromCampusKm: 0.5,
+                    address: current.address.startsWith(
+                      DEVICE_LOCATION_ADDRESS_PREFIX,
+                    )
+                      ? ""
+                      : current.address,
+                  }))
+                }
+                type="button"
+              >
+                Clear location
+              </button>
+            </div>
+          ) : null}
+
+          {locationError ? (
+            <p className="rounded-[8px] bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {locationError}
+            </p>
+          ) : null}
+        </div>
 
         <label className="grid gap-2 text-sm font-semibold text-slate-700">
           Cuisine
@@ -223,6 +364,11 @@ export function RestaurantSuggestionForm({
             type="number"
             value={form.distanceFromCampusKm}
           />
+          <p className="text-xs font-normal leading-5 text-slate-500">
+            {form.latitude !== null && form.longitude !== null
+              ? "Auto-filled from your current device location. You can still adjust it if needed."
+              : "If you use GPS, this field will auto-fill for you."}
+          </p>
         </label>
 
         <label className="grid gap-2 text-sm font-semibold text-slate-700 lg:col-span-2">

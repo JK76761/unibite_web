@@ -3,14 +3,16 @@ import { type FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AdminDataTools } from "../components/AdminDataTools";
 import { AppHeader } from "../components/AppHeader";
-import { CompassIcon, SearchIcon } from "../components/Icons";
+import { CompassIcon } from "../components/Icons";
 import { RestaurantSuggestionForm } from "../components/RestaurantSuggestionForm";
 import { useExplorer } from "../context/ExplorerContext";
 import {
   ADMIN_SESSION_INVALIDATED_EVENT,
+  expireAdminSession,
   clearStoredAdminKey,
-  getStoredAdminKey,
+  hasActiveAdminSession,
   setStoredAdminKey,
+  touchAdminSession,
 } from "../lib/adminSession";
 import { checkAdminAccess } from "../lib/api";
 
@@ -19,8 +21,8 @@ export function AddSpotPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") === "review" ? "review" : "suggest";
   const [activeTab, setActiveTab] = useState<"suggest" | "review">(initialTab);
-  const [adminKeyInput, setAdminKeyInput] = useState(() => getStoredAdminKey());
-  const [hasUnlockedAdmin, setHasUnlockedAdmin] = useState(() => Boolean(getStoredAdminKey()));
+  const [adminKeyInput, setAdminKeyInput] = useState("");
+  const [hasUnlockedAdmin, setHasUnlockedAdmin] = useState(() => hasActiveAdminSession());
   const [adminErrorMessage, setAdminErrorMessage] = useState("");
 
   useEffect(() => {
@@ -59,9 +61,51 @@ export function AddSpotPage() {
 
   useEffect(() => {
     if (adminAccessQuery.data?.isAdmin) {
+      touchAdminSession();
       setAdminErrorMessage("");
     }
   }, [adminAccessQuery.data]);
+
+  useEffect(() => {
+    if (activeTab !== "review" || !hasUnlockedAdmin) {
+      return;
+    }
+
+    let lastActivityAt = 0;
+    const registerActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityAt < 10000) {
+        return;
+      }
+
+      lastActivityAt = now;
+      touchAdminSession();
+    };
+
+    const intervalId = window.setInterval(() => {
+      if (!hasActiveAdminSession()) {
+        expireAdminSession("Admin session expired after inactivity. Please unlock again.");
+      }
+    }, 15000);
+
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "pointerdown",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, registerActivity, { passive: true });
+    });
+
+    return () => {
+      window.clearInterval(intervalId);
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, registerActivity);
+      });
+    };
+  }, [activeTab, hasUnlockedAdmin]);
 
   const changeTab = (tab: "suggest" | "review") => {
     setActiveTab(tab);
@@ -192,20 +236,20 @@ export function AddSpotPage() {
           <form className="mt-5 grid gap-4" onSubmit={unlockAdmin}>
             <label className="grid gap-2 text-sm font-semibold text-slate-700">
               Admin key
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  className="ui-input pl-11"
-                  onChange={(event) => {
-                    setAdminKeyInput(event.target.value);
-                    if (adminErrorMessage) {
-                      setAdminErrorMessage("");
-                    }
-                  }}
-                  placeholder="Enter your admin passcode"
-                  value={adminKeyInput}
-                />
-              </div>
+              <input
+                autoComplete="off"
+                className="ui-input"
+                onChange={(event) => {
+                  setAdminKeyInput(event.target.value);
+                  if (adminErrorMessage) {
+                    setAdminErrorMessage("");
+                  }
+                }}
+                placeholder="Enter your admin passcode"
+                spellCheck={false}
+                type="password"
+                value={adminKeyInput}
+              />
             </label>
 
             <button
@@ -223,8 +267,8 @@ export function AddSpotPage() {
             ) : null}
 
             <p className="text-xs text-slate-500">
-              Local development default: <code>0002</code>. Change
-              the backend `AdminSecurity:ApiKey` before shipping anything public.
+              Admin access is hidden, expires automatically after inactivity,
+              and should only be shared with trusted reviewers.
             </p>
           </form>
         </section>

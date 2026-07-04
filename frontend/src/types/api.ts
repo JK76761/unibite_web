@@ -58,6 +58,8 @@ export type CreateRestaurantInput = {
   mood: string;
   description: string;
   distanceFromCampusKm: number;
+  latitude?: number;
+  longitude?: number;
   websiteUrl?: string;
 };
 

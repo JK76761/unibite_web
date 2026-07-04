@@ -14,9 +14,9 @@ import type {
   RestaurantSummary,
 } from "../types/api";
 import {
-  clearStoredAdminKey,
+  expireAdminSession,
   getStoredAdminKey,
-  notifyAdminSessionInvalidated,
+  touchAdminSession,
 } from "./adminSession";
 
 const API_BASE_URL = (
@@ -63,11 +63,14 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     }
 
     if (response.status === 401 && path.startsWith("/api/admin")) {
-      clearStoredAdminKey();
-      notifyAdminSessionInvalidated(message);
+      expireAdminSession(message);
     }
 
     throw new Error(message);
+  }
+
+  if (path.startsWith("/api/admin") && storedAdminKey) {
+    touchAdminSession();
   }
 
   if (response.status === 204) {
