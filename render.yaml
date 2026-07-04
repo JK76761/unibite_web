@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: unibite
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: UNIBITE_DATA_DIR
+        value: /var/data
+      - key: AdminSecurity__ApiKey
+        sync: false
+      - key: GooglePlaces__ApiKey
+        sync: false
+      - key: Swagger__Enabled
+        value: "false"
+    disk:
+      name: unibite-data
+      mountPath: /var/data
+      sizeGB: 1

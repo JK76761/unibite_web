@@ -1,0 +1,17 @@
+.git
+.gitignore
+.DS_Store
+
+backend/**/bin
+backend/**/obj
+backend/UniBite.Api/Data/*.db
+backend/UniBite.Api/Data/*.db-shm
+backend/UniBite.Api/Data/*.db-wal
+
+frontend/node_modules
+frontend/dist
+frontend/.env.local
+frontend/.env.*.local
+
+bin
+obj
